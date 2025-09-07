@@ -1,0 +1,10 @@
+artifact_location: file:///C:/Users/Sashank%20Ram/Documents/End-to-end-ML-Final-with-MLFlo/mlruns/0/models/m-0088a224d0d54ca48155a57db38db8b4/artifacts
+creation_timestamp: 1757240437681
+experiment_id: '0'
+last_updated_timestamp: 1757240441137
+model_id: m-0088a224d0d54ca48155a57db38db8b4
+model_type: null
+name: model
+source_run_id: daf2a04d3ba64620990f9331f872d291
+status: 2
+status_message: null
