@@ -1,8 +1,5 @@
 FROM python:3.8-slim-buster
 
-# Update and install awscli
-RUN apt-get update -y && apt-get install -y awscli
-
 # Set working directory
 WORKDIR /app
 
