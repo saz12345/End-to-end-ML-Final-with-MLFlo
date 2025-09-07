@@ -34,16 +34,30 @@ jobs:
           AWS_REGION: ${{ secrets.AWS_REGION }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          echo "📦 ECR_REPOSITORY: $ECR_REPOSITORY"
+          echo "🌍 AWS_REGION: $AWS_REGION"
+
+          if [ -z "$ECR_REPOSITORY" ]; then
+            echo "❌ ERROR: ECR_REPOSITORY is empty. Please set it in GitHub Secrets."
+            exit 1
+          fi
+
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          IMAGE_URI="$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG"
+
+          echo "🐳 Building image: $IMAGE_URI"
           docker build -t $IMAGE_URI .
+
+          echo "🚀 Pushing image to ECR"
           docker push $IMAGE_URI
+
           echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
 
       - name: Fill in the new image ID in the ECS task definition
         id: render-task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: ecs-task-definition.json  # Must be committed or generated
+          task-definition: ecs-task-definition.json  # Must be in repo or generated
           container-name: ${{ secrets.CONTAINER_NAME }}
           image: ${{ env.IMAGE_URI }}
 
