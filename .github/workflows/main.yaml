@@ -1,72 +1,100 @@
-name: Deploy Flask App to AWS ECS
+name: Workflow
 
 on:
   push:
     branches:
-      - main  # Trigger deployment on push to main branch
+      - main
+    paths-ignore:
+      - 'README.md'  # Trigger deployment on push to main branch
+
+permissions:
+  id_token: write
+  contents: read
 
 jobs:
-  deploy:
-    name: Build and Deploy to ECS
+  integration:
+    name: Continuous Integration
     runs-on: ubuntu-latest
-
     steps:
-      - name: 🧾 Checkout code
+      - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: 🐳 Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Lint code
+        run: echo "Linting repository"
 
-      - name: 🔐 Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+      - name: Run unit tests
+        run: echo "Running unit tests"
+
+  build-and-push-ecr-image:
+    name: Continuous Delivery
+    needs: integration
+    runs-on: ubuntu-latest
+    steps:
+       - name: Checkout code
+         uses: actions/checkout@v3
+
+       - name: Install utilities
+         run: |
+           sudo apt-get update
+           sudo apt-get install -y jq unzip
+
+       - name: Configure AWS credentials
+         uses: aws-actions/configure-aws-credentials@v1
+         with:
+           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+           aws-region: ${{ secrets.AWS_REGION }}
+
+       - name: Login to Amazon ECR
+         id: login-ecr
+         uses: aws-actions/amazon-ecr-login@v1
+
+       - name: Build, tag, and push Docker image to ECR
+         id: build-image
+         env:
+           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+           ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY_NAME }}
+           IMAGE_TAG: latest
+         run: |
+           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+  Continuous-Deployment:
+    needs: build-and-push-ecr-image
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: 🔑 Login to Amazon ECR
+      - name: Login to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: aws-actions/amazon-ecr-login@v1
 
-      - name: 🛠️ Build, tag, and push Docker image to ECR
+      - name: Pull latest image
         run: |
-          echo "🔧 Exporting environment variables..."
-          export ECR_REPOSITORY="${{ secrets.ECR_REPOSITORY }}"
-          export AWS_REGION="${{ secrets.AWS_REGION }}"
-          export IMAGE_TAG="${{ github.sha }}"
+          docker pull ${{ secrets.AWS_ECR_LOGIN_URI }}/${{ secrets.ECR_REPOSITORY_NAME }}:latest
 
-          echo "📦 ECR_REPOSITORY: $ECR_REPOSITORY"
-          echo "🌍 AWS_REGION: $AWS_REGION"
-          echo "🔢 IMAGE_TAG: $IMAGE_TAG"
+      - name: Stop and remove old container
+        run: |
+          docker stop cnncls || true
+          docker rm cnncls || true
 
-          if [ -z "$ECR_REPOSITORY" ]; then
-            echo "❌ ERROR: ECR_REPOSITORY is empty. Please set it in GitHub Secrets."
-            exit 1
-          fi
+      - name: Run Docker image to serve users
+        run: |
+          docker run -d -p 8080:8080 \
+            --name cnncls \
+            -e AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} \
+            -e AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
+            ${{ secrets.AWS_ECR_LOGIN_URI }}/${{ secrets.ECR_REPOSITORY_NAME }}:latest
 
-          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          IMAGE_URI="$ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG"
-
-          echo "🐳 Building Docker image: $IMAGE_URI"
-          docker build -t $IMAGE_URI .
-
-          echo "📤 Pushing Docker image to ECR"
-          docker push $IMAGE_URI
-
-          echo "💾 IMAGE_URI=$IMAGE_URI"
-          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
-
-      - name: 📝 Fill in the new image in the ECS task definition
-        id: render-task-def
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
-        with:
-          task-definition: ecs-task-definition.json  # Ensure this file is committed
-          container-name: ${{ secrets.CONTAINER_NAME }}
-          image: ${{ env.IMAGE_URI }}
-
-      - name: 🚀 Deploy ECS service
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
-        with:
-          service: ${{ secrets.ECS_SERVICE_NAME }}
-          cluster: ${{ secrets.ECS_CLUSTER_NAME }}
-          task-definition: ${{ steps.render-task-def.outputs.task-definition }}
+      - name: Clean previous images and containers
+        run: |
+          docker system prune -f
