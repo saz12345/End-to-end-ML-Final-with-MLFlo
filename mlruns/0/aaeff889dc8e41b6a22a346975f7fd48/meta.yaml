@@ -1,0 +1,14 @@
+artifact_uri: file:///C:/Users/Sashank%20Ram/Documents/End-to-end-ML-Final-with-MLFlo/mlruns/0/aaeff889dc8e41b6a22a346975f7fd48/artifacts
+end_time: 1757235320728
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: aaeff889dc8e41b6a22a346975f7fd48
+run_name: languid-eel-170
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1757235314076
+status: 3
+tags: []
+user_id: Sashank Ram
